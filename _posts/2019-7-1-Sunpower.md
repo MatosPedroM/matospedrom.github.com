@@ -1,8 +1,8 @@
 
 # EDP Open Data SunPower Prediction
-##The analytic to participate in the SunPower prediction challenge at EDP Open Data
+## The analytic to participate in the SunPower prediction challenge at EDP Open Data
 
-*TODO: Desciption of the challenge*
+*TODO: Description of the challenge*
 
 Let's first import all the major packages
 
@@ -526,7 +526,7 @@ plot_channels (meteo_data, plot_type= 'line' , min_range=0, max_range=4000)
 ```
 
 
-![png](../assets/2019-7-1-Sunpower/fig1.png)
+![png](/assets/2019-7-1-Sunpower/fig1.png)
 
 
 
