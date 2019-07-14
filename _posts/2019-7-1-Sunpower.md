@@ -1,10 +1,32 @@
+---
+layout: post
+title: "EDP Open Data SunPower Prediction Competition"
+categories: misc
+---
 
-# EDP Open Data SunPower Prediction
-## The analytic to participate in the SunPower prediction challenge at EDP Open Data
+## EDP Open Data SunPower Prediction Competition
 
-*TODO: Description of the challenge*
+[Short-description]
 
-Let's first import all the major packages
+### Sublab
+
+[Sunlab](https://opendata.edp.com/pages/Sunlab/) is a photovoltaic on-field laboratoy whose main objective is to supports **[EDP](http://www.edp.com)'**s business units on the acquisition of knowledge in the solar marketfield. The project has been covering the following topics:
+
+* Performance and reliability analysis of conventional PV technologies;
+* Demonstration of new technologies and evaluation of its potential to integrate EDP’s portofolio;
+* Optimization and identification of new approaches regarding O&M challenges;
+* Provide a strong database crucial for the development of analytic tools (e.g. forecasting models).
+
+Sunlab laboratories are scattered throughout mainland Portugal, in which photovoltaic panels using different technologies have been installed. This way, we can characterize the performance of each technology under different climatic conditions.
+
+SunLab has been in operation since 2012.
+
+### Competition
+
+The [objective](https://opendata.edp.com/pages/challenges/) of this competition is to build an algorithm that predicts the **production of solar module B (with optimal orientation) for the first seven days of 2018.** For this, you can rely on the weather station data for these days 
+
+
+
 
 ```python
 import warnings 
@@ -16,20 +38,696 @@ import numpy as np
 from matplotlib import pyplot
 %matplotlib inline
 
-import locale
-#locale.setlocale(locale.LC_ALL, 'pt_PT')
+import seaborn as sns
+sns.set(style='white', palette='deep', font_scale=1.25, font='calibri')
 
+
+```
+
+The dataset consisits of two sets of datafiles with readings for several years (2014-2018):
+* Weather station data
+* PV's modules generation and temperature data
+
+The granularity of the data is one minute and the timezone is UTC (Coordinated Universal Time) and all files have daylight saving time correction.
+
+As we will be forecasting the power generation for 2018 we will load everything else (2014-2017).
+
+## Reading weather station data
+
+Haveing to read several file we will batch-reading using **iglob**
+
+
+```python
+from glob import iglob
+
+path = r'sunlab-faro-meteo*.csv'
+all_rec = iglob(path, recursive=True)     
+batch = (pd.read_csv(f, sep =";", decimal='.',index_col=0, parse_dates=True) for f in all_rec)
+meteo_data = pd.concat(batch)
+#sort the index
+meteo_data.sort_index(inplace=True)
+#show first and last rows
+
+#meteo_data_raw.head()
+#meteo_data_raw.tail()
+
+print('Total lines:', len(meteo_data)) 
+print(meteo_data.count())
+
+```
+
+    Total lines: 1886656
+    Ambient Temperature [ºC]      1886656
+    Atmospheric pressure [hPa]     585633
+    Diffuse Radiation [W/m2]      1486912
+    Direct Radiation [W/m2]        399744
+    Global Radiation [W/m2]       1886656
+    Precipitation [mm]             585633
+    Ultraviolet [W/m2]            1886656
+    Wind Direction [º]            1886656
+    Wind Velocity [m/s]           1886656
+    dtype: int64
+    
+
+Comparing the counts we can see that the full dataset as ~1.8M registers but some 'channels' have lot less information (Atmospheric pressure, Direct Radiation and Precipitation)
+
+Let's see the general stats of the dataset
+
+
+```python
+meteo_data.describe()
+```
+
+
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>Ambient Temperature [ºC]</th>
+      <th>Atmospheric pressure [hPa]</th>
+      <th>Diffuse Radiation [W/m2]</th>
+      <th>Direct Radiation [W/m2]</th>
+      <th>Global Radiation [W/m2]</th>
+      <th>Precipitation [mm]</th>
+      <th>Ultraviolet [W/m2]</th>
+      <th>Wind Direction [º]</th>
+      <th>Wind Velocity [m/s]</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>count</th>
+      <td>1.886656e+06</td>
+      <td>5.856330e+05</td>
+      <td>1.486912e+06</td>
+      <td>399744.000000</td>
+      <td>1.886656e+06</td>
+      <td>585633.00000</td>
+      <td>1.886656e+06</td>
+      <td>1.886656e+06</td>
+      <td>1.886656e+06</td>
+    </tr>
+    <tr>
+      <th>mean</th>
+      <td>-7.136860e+03</td>
+      <td>-4.106221e+03</td>
+      <td>6.474817e+01</td>
+      <td>63.948456</td>
+      <td>2.312152e+02</td>
+      <td>0.00087</td>
+      <td>1.419916e+01</td>
+      <td>2.142176e+02</td>
+      <td>-7.153373e+03</td>
+    </tr>
+    <tr>
+      <th>std</th>
+      <td>3.276161e+06</td>
+      <td>2.771999e+06</td>
+      <td>9.466603e+01</td>
+      <td>96.749847</td>
+      <td>3.182966e+02</td>
+      <td>0.01856</td>
+      <td>1.923120e+01</td>
+      <td>9.881624e+01</td>
+      <td>3.276161e+06</td>
+    </tr>
+    <tr>
+      <th>min</th>
+      <td>-1.500000e+09</td>
+      <td>-1.499999e+09</td>
+      <td>1.564069e+00</td>
+      <td>1.574275</td>
+      <td>7.284710e-01</td>
+      <td>0.00000</td>
+      <td>4.954330e-01</td>
+      <td>0.000000e+00</td>
+      <td>-1.500000e+09</td>
+    </tr>
+    <tr>
+      <th>25%</th>
+      <td>1.440000e+01</td>
+      <td>1.012700e+03</td>
+      <td>1.690771e+00</td>
+      <td>1.687485</td>
+      <td>1.565097e+00</td>
+      <td>0.00000</td>
+      <td>5.105560e-01</td>
+      <td>1.241708e+02</td>
+      <td>1.116667e+00</td>
+    </tr>
+    <tr>
+      <th>50%</th>
+      <td>1.840000e+01</td>
+      <td>1.015700e+03</td>
+      <td>9.936894e+00</td>
+      <td>8.564234</td>
+      <td>1.011498e+01</td>
+      <td>0.00000</td>
+      <td>1.251254e+00</td>
+      <td>2.375354e+02</td>
+      <td>1.983333e+00</td>
+    </tr>
+    <tr>
+      <th>75%</th>
+      <td>2.290000e+01</td>
+      <td>1.019700e+03</td>
+      <td>9.803525e+01</td>
+      <td>91.860982</td>
+      <td>4.376783e+02</td>
+      <td>0.00000</td>
+      <td>2.519825e+01</td>
+      <td>2.983271e+02</td>
+      <td>2.933334e+00</td>
+    </tr>
+    <tr>
+      <th>max</th>
+      <td>3.830000e+01</td>
+      <td>1.035900e+03</td>
+      <td>7.765521e+02</td>
+      <td>790.061200</td>
+      <td>1.484380e+03</td>
+      <td>2.04000</td>
+      <td>8.551538e+01</td>
+      <td>3.600000e+02</td>
+      <td>1.501667e+01</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+We can see that there is some 'strange' very low negatives in the Ambient Temperature, Atmospheric pressure and Wind Velocity 
+
+For a quick visual inspection lets plot all the channels. Let's build a function because we'll suerly use it several times...
+
+
+```python
+def plot_channels (dataset):
+    n_channels = len(dataset.columns)
+    max_range = len(dataset)
+
+    pyplot.figure(figsize=(20,15))
+    for i in range (n_channels):
+        pyplot.subplot(n_channels, 1, i+1)
+        pyplot.title(dataset.columns[i], y=1)
+        pyplot.plot(dataset.iloc[0:max_range,i].values)
+        pyplot.grid()
+    pyplot.show()
+    
+plot_channels(meteo_data)
+```
+
+
+![png](output_7_0.png)
+
+
+So there are a couple of very negative values for Ambient Temperature, Atmospheric Pressure and Wind Velocity that we will eliminate by replace them with the average of the prior and next reading
+
+Let's build a function because we'll suerly use it more than once
+
+
+```python
+def replace_outliers_mean(dataset, columns, threshold):
+    for col in columns:
+        print ('Fixing', col)
+        i = 0
+        while  dataset[col].min() < threshold:
+            aux = dataset[col].min()
+            indx = np.where(dataset[col] == aux)[0][0]
+            avr = (dataset[col].iloc[indx-1] + dataset[col].iloc[indx+1])/2
+            dataset[col].iloc[indx] = avr
+            i = i + 1
+        print('Fixed', i, 'values')
+        
+replace_outliers_mean(meteo_data, ['Ambient Temperature [ºC]', 'Atmospheric pressure [hPa]','Wind Velocity [m/s]']  , -1)
+```
+
+    Fixing Ambient Temperature [ºC]
+    Fixed 9 values
+    Fixing Atmospheric pressure [hPa]
+    Fixed 2 values
+    Fixing Wind Velocity [m/s]
+    Fixed 9 values
+    
+
+So let's check the dataset again
+
+
+```python
+meteo_data.describe()
+```
+
+
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>Ambient Temperature [ºC]</th>
+      <th>Atmospheric pressure [hPa]</th>
+      <th>Diffuse Radiation [W/m2]</th>
+      <th>Direct Radiation [W/m2]</th>
+      <th>Global Radiation [W/m2]</th>
+      <th>Precipitation [mm]</th>
+      <th>Ultraviolet [W/m2]</th>
+      <th>Wind Direction [º]</th>
+      <th>Wind Velocity [m/s]</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>count</th>
+      <td>1.886656e+06</td>
+      <td>585633.000000</td>
+      <td>1.486912e+06</td>
+      <td>399744.000000</td>
+      <td>1.886656e+06</td>
+      <td>585633.00000</td>
+      <td>1.886656e+06</td>
+      <td>1.886656e+06</td>
+      <td>1.886656e+06</td>
+    </tr>
+    <tr>
+      <th>mean</th>
+      <td>1.865772e+01</td>
+      <td>1016.440980</td>
+      <td>6.474817e+01</td>
+      <td>63.948456</td>
+      <td>2.312152e+02</td>
+      <td>0.00087</td>
+      <td>1.419916e+01</td>
+      <td>2.142176e+02</td>
+      <td>2.144940e+00</td>
+    </tr>
+    <tr>
+      <th>std</th>
+      <td>5.834916e+00</td>
+      <td>5.721132</td>
+      <td>9.466603e+01</td>
+      <td>96.749847</td>
+      <td>3.182966e+02</td>
+      <td>0.01856</td>
+      <td>1.923120e+01</td>
+      <td>9.881624e+01</td>
+      <td>1.287729e+00</td>
+    </tr>
+    <tr>
+      <th>min</th>
+      <td>1.700000e+00</td>
+      <td>990.800000</td>
+      <td>1.564069e+00</td>
+      <td>1.574275</td>
+      <td>7.284710e-01</td>
+      <td>0.00000</td>
+      <td>4.954330e-01</td>
+      <td>0.000000e+00</td>
+      <td>0.000000e+00</td>
+    </tr>
+    <tr>
+      <th>25%</th>
+      <td>1.440000e+01</td>
+      <td>1012.700000</td>
+      <td>1.690771e+00</td>
+      <td>1.687485</td>
+      <td>1.565097e+00</td>
+      <td>0.00000</td>
+      <td>5.105560e-01</td>
+      <td>1.241708e+02</td>
+      <td>1.116667e+00</td>
+    </tr>
+    <tr>
+      <th>50%</th>
+      <td>1.840000e+01</td>
+      <td>1015.700000</td>
+      <td>9.936894e+00</td>
+      <td>8.564234</td>
+      <td>1.011498e+01</td>
+      <td>0.00000</td>
+      <td>1.251254e+00</td>
+      <td>2.375354e+02</td>
+      <td>1.983333e+00</td>
+    </tr>
+    <tr>
+      <th>75%</th>
+      <td>2.290000e+01</td>
+      <td>1019.700000</td>
+      <td>9.803525e+01</td>
+      <td>91.860982</td>
+      <td>4.376783e+02</td>
+      <td>0.00000</td>
+      <td>2.519825e+01</td>
+      <td>2.983271e+02</td>
+      <td>2.933334e+00</td>
+    </tr>
+    <tr>
+      <th>max</th>
+      <td>3.830000e+01</td>
+      <td>1035.900000</td>
+      <td>7.765521e+02</td>
+      <td>790.061200</td>
+      <td>1.484380e+03</td>
+      <td>2.04000</td>
+      <td>8.551538e+01</td>
+      <td>3.600000e+02</td>
+      <td>1.501667e+01</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+
+```python
+plot_channels(meteo_data)
+```
+
+
+![png](output_12_0.png)
+
+
+Now we can adress the huge 'gap' in the readings of Diffuse Radiation channel. Looks like there is an entire year of readings missing(?). For the sake of the exercice and suspecting that it could be an important variable in the PV generation forecast let's try to sort it out 
+
+First of all let's have a closer look and check the NaN in Diffuse Radiation channel
+
+
+```python
+difuse_null = meteo_data[meteo_data['Diffuse Radiation [W/m2]'].isnull()]
+difuse_null.count()
+```
+
+
+
+
+    Ambient Temperature [ºC]      399744
+    Atmospheric pressure [hPa]     60743
+    Diffuse Radiation [W/m2]           0
+    Direct Radiation [W/m2]       399744
+    Global Radiation [W/m2]       399744
+    Precipitation [mm]             60743
+    Ultraviolet [W/m2]            399744
+    Wind Direction [º]            399744
+    Wind Velocity [m/s]           399744
+    dtype: int64
+
+
+
+
+```python
+difuse_null.head()
+```
+
+
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>Ambient Temperature [ºC]</th>
+      <th>Atmospheric pressure [hPa]</th>
+      <th>Diffuse Radiation [W/m2]</th>
+      <th>Direct Radiation [W/m2]</th>
+      <th>Global Radiation [W/m2]</th>
+      <th>Precipitation [mm]</th>
+      <th>Ultraviolet [W/m2]</th>
+      <th>Wind Direction [º]</th>
+      <th>Wind Velocity [m/s]</th>
+    </tr>
+    <tr>
+      <th>Datetime</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>2016-01-01 00:00:00</th>
+      <td>14.700000</td>
+      <td>NaN</td>
+      <td>NaN</td>
+      <td>1.652583</td>
+      <td>1.310691</td>
+      <td>NaN</td>
+      <td>0.512630</td>
+      <td>236.00228</td>
+      <td>0.366667</td>
+    </tr>
+    <tr>
+      <th>2016-01-01 00:01:00</th>
+      <td>14.700000</td>
+      <td>NaN</td>
+      <td>NaN</td>
+      <td>1.649963</td>
+      <td>1.329118</td>
+      <td>NaN</td>
+      <td>0.512932</td>
+      <td>249.30390</td>
+      <td>0.366667</td>
+    </tr>
+    <tr>
+      <th>2016-01-01 00:02:00</th>
+      <td>14.700000</td>
+      <td>NaN</td>
+      <td>NaN</td>
+      <td>1.647226</td>
+      <td>1.696856</td>
+      <td>NaN</td>
+      <td>0.512932</td>
+      <td>272.17626</td>
+      <td>0.416667</td>
+    </tr>
+    <tr>
+      <th>2016-01-01 00:03:00</th>
+      <td>14.633332</td>
+      <td>NaN</td>
+      <td>NaN</td>
+      <td>1.658082</td>
+      <td>1.717860</td>
+      <td>NaN</td>
+      <td>0.512529</td>
+      <td>298.29700</td>
+      <td>0.483333</td>
+    </tr>
+    <tr>
+      <th>2016-01-01 00:04:00</th>
+      <td>14.600000</td>
+      <td>NaN</td>
+      <td>NaN</td>
+      <td>1.660759</td>
+      <td>1.721190</td>
+      <td>NaN</td>
+      <td>0.512331</td>
+      <td>323.33370</td>
+      <td>0.516667</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+
+```python
+difuse_null.tail()
+```
+
+
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>Ambient Temperature [ºC]</th>
+      <th>Atmospheric pressure [hPa]</th>
+      <th>Diffuse Radiation [W/m2]</th>
+      <th>Direct Radiation [W/m2]</th>
+      <th>Global Radiation [W/m2]</th>
+      <th>Precipitation [mm]</th>
+      <th>Ultraviolet [W/m2]</th>
+      <th>Wind Direction [º]</th>
+      <th>Wind Velocity [m/s]</th>
+    </tr>
+    <tr>
+      <th>Datetime</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>2016-12-31 22:56:00</th>
+      <td>11.200000</td>
+      <td>1025.8000</td>
+      <td>NaN</td>
+      <td>2.074804</td>
+      <td>2.102965</td>
+      <td>0.0</td>
+      <td>0.509100</td>
+      <td>62.577372</td>
+      <td>1.666667</td>
+    </tr>
+    <tr>
+      <th>2016-12-31 22:57:00</th>
+      <td>11.233334</td>
+      <td>1025.8000</td>
+      <td>NaN</td>
+      <td>1.861577</td>
+      <td>1.560519</td>
+      <td>0.0</td>
+      <td>0.508898</td>
+      <td>59.805536</td>
+      <td>1.783333</td>
+    </tr>
+    <tr>
+      <th>2016-12-31 22:58:00</th>
+      <td>11.300000</td>
+      <td>1025.8000</td>
+      <td>NaN</td>
+      <td>1.857973</td>
+      <td>1.839297</td>
+      <td>0.0</td>
+      <td>0.508201</td>
+      <td>58.696268</td>
+      <td>1.783333</td>
+    </tr>
+    <tr>
+      <th>2016-12-31 22:59:00</th>
+      <td>11.300000</td>
+      <td>1025.7834</td>
+      <td>NaN</td>
+      <td>1.662369</td>
+      <td>1.756216</td>
+      <td>0.0</td>
+      <td>0.507706</td>
+      <td>52.142492</td>
+      <td>1.633333</td>
+    </tr>
+    <tr>
+      <th>2016-12-31 23:00:00</th>
+      <td>11.300000</td>
+      <td>1025.7668</td>
+      <td>NaN</td>
+      <td>1.669746</td>
+      <td>1.640478</td>
+      <td>0.0</td>
+      <td>0.506991</td>
+      <td>59.050408</td>
+      <td>1.666667</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+Well that's an entire year of Diffuse Radiation without readings!
+
+Now, there are two ways:
+1.  Remove 2016 from the dataset, losing the readings from the other channels of that year, or 
+2.  Not using the Diffuse Radiation channel at all, losing what could be an important variable in the forecast.
+
+Let's go with the option number one and drop 2016 from the dataset
+
+
+
+
+```python
+
+
+#meteo_data  = meteo_data.dropna(subset=['Diffuse Radiation [W/m2]'])
+#plot_channels(meteo_data)
+```
+
+
+![png](output_18_0.png)
+
+
+
+```python
 from glob import iglob
 
 from sklearn import datasets, linear_model
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
-import seaborn as sns
-sns.set(style='white', palette='deep', font_scale=1.25, font='calibri
 ```
 
-It will be helpfull the plot the different 'channels' in order to visualy inspect what is going on
 
 ```python
 def plot_channels (dataset, plot_type, min_range = 0, max_range = 100):
@@ -45,9 +743,7 @@ def plot_channels (dataset, plot_type, min_range = 0, max_range = 100):
             pyplot.hist(dataset.iloc[:,i].values, bins = 100)
         pyplot.grid()
     pyplot.show()
-```
-
-```python    
+    
 # split a univariate sequence into samples
 def to_supervised(sequence, n_steps_1, n_output = 1, n_steps_2 = 0):
     X, y = list(), list()
@@ -74,20 +770,11 @@ sample_rule = '5T'
 
 
 ```python
-from glob import iglob
-path = r'sunlab-faro-meteo*2017.csv'
-all_rec = iglob(path, recursive=True)     
-batch = (pd.read_csv(f, sep =";", decimal='.',index_col=0, parse_dates=True) for f in all_rec)
-meteo_data = pd.concat(batch)
-#sort the index
-meteo_data.sort_index(inplace=True)
-#show first and last rows
+pd.set_option('display.date_dayfirst', True)
+```
 
-#meteo_data_raw.head()
-#meteo_data_raw.tail()
 
-print('Total lines:', len(meteo_data)) 
-print(meteo_data.count())
+```python
 
 ```
 
@@ -107,6 +794,8 @@ print(meteo_data.count())
 ```python
 meteo_data.describe()
 ```
+
+
 
 
 <div>
@@ -526,7 +1215,7 @@ plot_channels (meteo_data, plot_type= 'line' , min_range=0, max_range=4000)
 ```
 
 
-![png](/assets/2019-7-1-Sunpower/fig1.png)
+![png](output_29_0.png)
 
 
 
@@ -535,7 +1224,7 @@ plot_channels (meteo_data, plot_type= 'hist')
 ```
 
 
-![png](output_14_0.png)
+![png](output_30_0.png)
 
 
 
@@ -663,7 +1352,7 @@ pyplot.show()
 ```
 
 
-![png](output_16_0.png)
+![png](output_32_0.png)
 
 
 
@@ -818,7 +1507,7 @@ plot_channels (meteo_data_h, plot_type= 'line' , min_range=0, max_range=2000)
 ```
 
 
-![png](output_20_0.png)
+![png](output_36_0.png)
 
 
 
@@ -1029,7 +1718,7 @@ pyplot.show()
 ```
 
 
-![png](output_28_0.png)
+![png](output_44_0.png)
 
 
 
@@ -1264,7 +1953,7 @@ plot_channels (full_data_h, plot_type= 'line' , min_range=0, max_range=500)
 ```
 
 
-![png](output_31_0.png)
+![png](output_47_0.png)
 
 
 
@@ -1276,7 +1965,7 @@ pyplot.show()
 ```
 
 
-![png](output_32_0.png)
+![png](output_48_0.png)
 
 
 
@@ -1359,7 +2048,7 @@ pyplot.show()
 ```
 
 
-![png](output_34_0.png)
+![png](output_50_0.png)
 
 
 
@@ -2572,7 +3261,7 @@ plot_channels (submission_final, plot_type= 'line' , min_range=0, max_range=8000
 ```
 
 
-![png](output_64_0.png)
+![png](output_80_0.png)
 
 
 
